@@ -1,7 +1,7 @@
 {
     "name": "better-vscord",
     "displayName": "Better VSCord - Discord Rich Presence",
-    "version": "6.0.0",
+    "version": "6.1.0",
     "description": "Discord Rich Presence for VS Code that works without a running Discord client (fork of VSCord)",
     "publisher": "xapnat",
     "license": "MIT",
@@ -150,6 +150,12 @@
                         ],
                         "default": "Code",
                         "description": "Activity name shown on Discord (\"Playing ...\").\nChoosing \"Custom\" uses the name of the editor.",
+                        "order": 2
+                    },
+                    "vscord.app.customName": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Free text activity name shown on Discord. Overrides `vscord.app.name` when set.",
                         "order": 2
                     },
                     "vscord.app.id": {

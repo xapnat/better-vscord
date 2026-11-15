@@ -10,6 +10,9 @@ export const getApplicationId = (config: ExtensionConfiguration) => {
 };
 
 export const getActivityName = (config: ExtensionConfiguration) => {
+    const customName = (config.get(CONFIG_KEYS.App.CustomName) ?? "").trim();
+    if (customName) return customName.slice(0, 128);
+
     const name = config.get(CONFIG_KEYS.App.Name);
     return !name || name === "Custom" ? env.appName : name;
 };
