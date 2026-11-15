@@ -1,32 +1,35 @@
-<div align="center">
+# Better VSCord
 
-[<img width="256" alt="VSCord Logo" src="https://raw.githubusercontent.com/leonardssh/vscord/main/assets/icon.png" />][vsmp-link]
+Fork of [VSCord](https://github.com/LeonardSSH/vscord) that sets your [Discord Rich Presence](https://discord.com/rich-presence) **without a running Discord client**.
 
-<br />
+Upstream VSCord talks to the local Discord desktop app over IPC, which drops whenever Discord restarts, updates or is not open. Better VSCord instead logs you in once with **your own Discord application** (OAuth2 + PKCE) and updates your activity through Discord's HTTP API (headless sessions). No local Discord, no socket, nothing to reconnect.
 
-[![Open VSX Version][shield-ovsx-version]][ovsx-link]
-[![Open VSX Downloads][shield-ovsx-downloads]][ovsx-link]
-[![Open VSX Rating][shield-ovsx-rating]][ovsx-link]
+All customization settings of VSCord (`vscord.*`) keep working.
 
-[![Continuous Integration][shield-workflows-ci]][github-workflows-ci]
-[![Gitter Support Chat][shield-gitter-support]][gitter-vscord-support]
+## Setup
 
-[![Continuous Delivery][shield-workflows-cd]][github-workflows-cd]
+1. Create an application in the [Discord Developer Portal](https://discord.com/developers/applications). Its name is not important, the shown activity name comes from `vscord.app.name`.
+2. **OAuth2 → Redirects**: add `http://127.0.0.1:53682/callback`.
+3. **OAuth2 → Public Client**: turn it on (then no client secret is needed). If you leave it off, the extension asks for the client secret once and keeps it in the VS Code secret storage.
+4. **Social SDK → Getting Started**: fill in the short form to enable the Social SDK for the application. Without it Discord answers the login with `invalid_scope`.
+5. In VS Code set `vscord.app.id` to the application id (client id) of your application.
+6. Click **Discord RPC** in the status bar (or run `VSCord: Connect to Discord`). Your browser opens, you approve the application once, done. The login is stored in the VS Code secret storage and refreshed automatically.
 
-</div>
+Uninstall or disable the original VSCord extension, both use the same setting and command ids.
 
-<br />
+## Usage
 
-# VSCord
+- **Status bar → `Discord RPC`**: click while connected to disconnect and remove your activity from Discord. Click again to connect.
+- `VSCord: Authorize with Discord (re-run login)`: log in again, for example after changing the application.
+- `VSCord: Remove Discord authorization`: revokes and deletes the stored login.
+- `vscord.app.redirectPort`: change it if port `53682` is taken (the redirect URI of your application has to match).
 
-Highly customizable [Discord Rich Presence](https://discord.com/rich-presence) extension for [Visual Studio Code](https://code.visualstudio.com/)
+## Good to know
 
-> Remember to 🌟 this GitHub if you 💖 it.
-
-## Disclaimer
-
-This extension does not work with snapstore / flatpak version of VSCode, please use the official version from the VSCode website!
-
+- The consent screen lists a few friends-list related permissions. They are part of `sdk.social_layer_presence`, the only scope that allows setting a presence over HTTP. The extension only sets your activity.
+- Headless sessions are not part of Discord's official public documentation, so Discord may change or remove them.
+- A session lives for 20 minutes on Discord's side. The extension renews it every 4 minutes and removes it when you disconnect or close the editor. After a crash the activity disappears on its own within 20 minutes.
+- With several windows open, the window you are working in owns the single shared activity.
 ## 📌 Features
 
 - Shows what you're working on!

@@ -38,5 +38,5 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vscord-${{ env.VERSION }}${{ env.PR_SUFFIX }}.vsix
-          path: vscord-*.vsix
+          name: better-vscord-${{ env.VERSION }}${{ env.PR_SUFFIX }}.vsix
+          path: better-vscord-*.vsix

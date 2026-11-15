@@ -1,24 +1,20 @@
+import { env } from "vscode";
 import type { ExtensionConfiguration } from "../config";
 import { CONFIG_KEYS } from "../constants";
 
+export const DEFAULT_REDIRECT_PORT = 53682;
+
 export const getApplicationId = (config: ExtensionConfiguration) => {
-    const applicationIds = new Map([
-        ["Code", "782685898163617802"],
-        ["Visual Studio Code", "810516608442695700"],
-        ["VSCodium", "1031067701474492496"],
-        ["Antigravity", "1441771215290372156"],
-        ["Cursor", "1376937466619232256"],
-        ["Custom", config.get(CONFIG_KEYS.App.Id)!]
-    ]);
+    const clientId = (config.get(CONFIG_KEYS.App.Id) ?? "").trim();
+    return { clientId: /^\d{15,25}$/.test(clientId) ? clientId : "" };
+};
 
-    const currentAppName = config.get(CONFIG_KEYS.App.Name)!;
+export const getActivityName = (config: ExtensionConfiguration) => {
+    const name = config.get(CONFIG_KEYS.App.Name);
+    return !name || name === "Custom" ? env.appName : name;
+};
 
-    let clientId = config.get(CONFIG_KEYS.App.Id)!;
-    for (const [appName, id] of applicationIds.entries()) {
-        if (currentAppName !== appName) continue;
-        clientId = id;
-        break;
-    }
-
-    return { clientId };
+export const getRedirectPort = (config: ExtensionConfiguration) => {
+    const port = config.get(CONFIG_KEYS.App.RedirectPort);
+    return typeof port === "number" && port > 0 && port < 65536 ? port : DEFAULT_REDIRECT_PORT;
 };

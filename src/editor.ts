@@ -36,16 +36,16 @@ class EditorController implements Disposable {
 
         const whenDisconnected: Partial<StatusBarItem> = {
             text: "$(warning) Discord RPC",
-            tooltip: "Disconnected. Click to reconnect",
+            tooltip: "Disconnected, nothing is shown on Discord. Click to connect",
             command: "vscord.reconnect"
         };
         const whenPending: Partial<StatusBarItem> = {
             text: "$(pulse) Discord RPC",
-            tooltip: "Please, wait. Connecting to Discord Gateway..."
+            tooltip: "Please, wait. Connecting to Discord..."
         };
         const whenSucceeded: Partial<StatusBarItem> = {
             text: "Discord RPC",
-            tooltip: "Connected to Discord Gateway. Click to disconnect",
+            tooltip: "Connected to Discord. Click to disconnect and hide your activity",
             command: "vscord.disconnect"
         };
         const statusBarItemByMode = {

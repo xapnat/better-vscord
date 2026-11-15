@@ -1,18 +1,20 @@
 {
-    "name": "vscord",
-    "displayName": "Discord Rich Presence",
-    "version": "5.3.12",
-    "description": "Highly customizable Discord Rich Presence extension for Visual Studio Code",
-    "publisher": "LeonardSSH",
+    "name": "better-vscord",
+    "displayName": "Better VSCord - Discord Rich Presence",
+    "version": "6.0.0",
+    "description": "Discord Rich Presence for VS Code that works without a running Discord client (fork of VSCord)",
+    "publisher": "xapnat",
     "license": "MIT",
     "contributors": [
-        "xhayper"
+        "LeonardSSH",
+        "xhayper",
+        "xapnat"
     ],
-    "repository": "https://github.com/LeonardSSH/vscord",
+    "repository": "https://github.com/xapnat/better-vscord",
     "bugs": {
-        "url": "https://github.com/LeonardSSH/vscord/issues"
+        "url": "https://github.com/xapnat/better-vscord/issues"
     },
-    "homepage": "https://github.com/LeonardSSH/vscord#readme",
+    "homepage": "https://github.com/xapnat/better-vscord#readme",
     "keywords": [
         "discord",
         "rich",
@@ -56,13 +58,12 @@
         "@rspack/cli": "^2.3.0",
         "@rspack/core": "^2.3.0",
         "@types/node": "~22.15.35",
-        "@types/vscode": "1.52.0",
+        "@types/vscode": "1.82.0",
         "@vscode/vsce": "^4.1.0",
         "npm-run-all": "^4.1.5",
         "ovsx": "^1.3.0",
         "prettier": "^3.9.10",
         "typescript": "^7.0.2"
-
     },
     "contributes": {
         "commands": [
@@ -88,12 +89,22 @@
             },
             {
                 "command": "vscord.disconnect",
-                "title": "Disconnect from Discord Gateway",
+                "title": "Disconnect from Discord",
                 "category": "VSCord"
             },
             {
                 "command": "vscord.reconnect",
-                "title": "Reconnect to Discord Gateway",
+                "title": "Connect to Discord",
+                "category": "VSCord"
+            },
+            {
+                "command": "vscord.authorize",
+                "title": "Authorize with Discord (re-run login)",
+                "category": "VSCord"
+            },
+            {
+                "command": "vscord.logout",
+                "title": "Remove Discord authorization",
                 "category": "VSCord"
             },
             {
@@ -138,13 +149,19 @@
                             "Custom"
                         ],
                         "default": "Code",
-                        "description": "Choose the name you want the application to use.\nChoosing \"Custom\" will make it so it use the \"rpc.id\" as application id",
+                        "description": "Activity name shown on Discord (\"Playing ...\").\nChoosing \"Custom\" uses the name of the editor.",
                         "order": 2
                     },
                     "vscord.app.id": {
                         "type": "string",
-                        "default": "782685898163617802",
-                        "description": "Application id that will be used when `appName` is \"Custom\" or when `appName` is invalid",
+                        "default": "",
+                        "description": "Application id (client id) of your own Discord application. The presence is set through this application after you authorized it, Discord does not need to be running.",
+                        "order": 3
+                    },
+                    "vscord.app.redirectPort": {
+                        "type": "number",
+                        "default": 53682,
+                        "description": "Local port used for the Discord login callback. Your Discord application needs the redirect URI `http://127.0.0.1:<port>/callback`.",
                         "order": 3
                     },
                     "vscord.app.privacyMode.enable": {
@@ -1368,13 +1385,10 @@
         ]
     },
     "capabilities": {
-        "virtualWorkspaces": {
-            "supported": false,
-            "description": "Cannot access local Discord RPC when running in virtual workspace"
-        }
+        "virtualWorkspaces": true
     },
     "engines": {
-        "vscode": "^1.52.0"
+        "vscode": "^1.82.0"
     },
     "packageManager": "npm@12.2.1",
     "allowScripts": {

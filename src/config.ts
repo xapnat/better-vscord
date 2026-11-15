@@ -30,6 +30,7 @@ interface Buttons {
 export interface ExtensionConfigurationType {
     enable: string;
     "app.id": string;
+    "app.redirectPort": number;
     "app.name": "Code" | "Visual Studio Code" | "VSCodium" | "Antigravity" | "Cursor" | "Custom";
     "app.privacyMode.enable": boolean;
     "app.whitelistEnabled": boolean;

@@ -4,13 +4,10 @@ import { StatusBarMode, editor } from "./editor";
 import { RPCController } from "./controller";
 import { CONFIG_KEYS } from "./constants";
 import { getConfig } from "./config";
-import { logInfo } from "./logger";
+import { logError, logInfo } from "./logger";
 import { dataClass } from "./data";
 
-const controller = new RPCController(
-    getApplicationId(getConfig()).clientId,
-    getConfig().get(CONFIG_KEYS.Behaviour.Debug)
-);
+let controller: RPCController;
 
 export const registerListeners = (ctx: ExtensionContext) => {
     const onConfigurationChanged = workspace.onDidChangeConfiguration(async () => {
@@ -23,8 +20,7 @@ export const registerListeners = (ctx: ExtensionContext) => {
 
         if (controller.client.clientId !== clientId) {
             if (!isEnabled) await controller.disable();
-            await controller.login();
-            if (isEnabled) await controller.enable();
+            else await controller.enable(false);
         }
 
         controller.manualIdleMode = config.get(CONFIG_KEYS.Status.Idle.Check) === false;
@@ -108,14 +104,33 @@ export const registerCommands = (ctx: ExtensionContext) => {
 
         editor.setStatusBarItem(StatusBarMode.Pending);
 
-        await controller
-            .login()
-            .then(async () => await controller.enable())
-            .catch(() => {
-                if (!config.get(CONFIG_KEYS.Behaviour.SuppressNotifications))
-                    window.showErrorMessage("Failed to reconnect to Discord Gateway");
-                editor.setStatusBarItem(StatusBarMode.Disconnected);
-            });
+        await controller.enable();
+    });
+
+    const authorizeCommand = commands.registerCommand("vscord.authorize", async () => {
+        logInfo("Authorizing with Discord...");
+
+        try {
+            await controller.authorize();
+            await controller.enable();
+
+            if (!config.get(CONFIG_KEYS.Behaviour.SuppressNotifications))
+                await window.showInformationMessage("Authorized with Discord");
+        } catch (error) {
+            logError("Failed to authorize with Discord:", error);
+            editor.setStatusBarItem(StatusBarMode.Disconnected);
+            window.showErrorMessage(`Failed to authorize with Discord: ${(error as Error).message}`);
+        }
+    });
+
+    const logoutCommand = commands.registerCommand("vscord.logout", async () => {
+        logInfo("Removing the Discord authorization...");
+
+        await controller.logout();
+        editor.setStatusBarItem(StatusBarMode.Disconnected);
+
+        if (!config.get(CONFIG_KEYS.Behaviour.SuppressNotifications))
+            await window.showInformationMessage("Removed the Discord authorization");
     });
 
     const disconnectCommand = commands.registerCommand("vscord.disconnect", async () => {
@@ -171,6 +186,8 @@ export const registerCommands = (ctx: ExtensionContext) => {
         disableWorkspaceCommand,
         reconnectCommand,
         disconnectCommand,
+        authorizeCommand,
+        logoutCommand,
         enablePrivacyModeCommand,
         disablePrivacyModeCommand,
         startIdlingCommand,
@@ -182,7 +199,7 @@ export const registerCommands = (ctx: ExtensionContext) => {
 
 export async function activate(ctx: ExtensionContext) {
     logInfo("Discord Rich Presence for VS Code activated.");
-    editor.setStatusBarItem(StatusBarMode.Pending);
+    controller = new RPCController(ctx, getConfig().get(CONFIG_KEYS.Behaviour.Debug));
     registerCommands(ctx);
     registerListeners(ctx);
 
@@ -193,6 +210,5 @@ export async function deactivate() {
     logInfo("Discord Rich Presence for VS Code deactivated.");
     editor.dispose();
     dataClass.dispose();
-    await controller.destroy();
-    logInfo("[004] Destroyed Discord RPC client");
+    await controller.shutdown();
 }

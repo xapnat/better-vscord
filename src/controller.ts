@@ -1,12 +1,26 @@
-import { type Disposable, type WindowState, debug, languages, window, workspace } from "vscode";
-import { type SetActivity, type SetActivityResponse, Client } from "@xhayper/discord-rpc";
+import {
+    type Disposable,
+    type ExtensionContext,
+    type WindowState,
+    Uri,
+    commands,
+    debug,
+    env,
+    languages,
+    window,
+    workspace
+} from "vscode";
+import type { SetActivity } from "@xhayper/discord-rpc";
 import type { GatewayActivityButton } from "discord-api-types/v10";
-import { getApplicationId } from "./helpers/getApplicationId";
+import { join } from "node:path";
+import { getActivityName, getApplicationId, getRedirectPort } from "./helpers/getApplicationId";
+import { DiscordOAuth, NotAuthorizedError } from "./discord/oauth";
 import { activity, onDiagnosticsChange } from "./activity";
+import { HeadlessPresence } from "./discord/headless";
 import { StatusBarMode, editor } from "./editor";
 import { validURL } from "./helpers/validURL";
 import { throttle } from "./helpers/throttle";
-import { logError, logInfo } from "./logger";
+import { logError, logInfo, outputChannel } from "./logger";
 import { CONFIG_KEYS } from "./constants";
 import { getConfig } from "./config";
 import { dataClass } from "./data";
@@ -19,8 +33,9 @@ export class RPCController {
     manualIdling = false;
     state: SetActivity = {};
     debug = false;
-    client: Client;
+    client: HeadlessPresence;
 
+    private oauth: DiscordOAuth;
     private idleTimeout: NodeJS.Timeout | undefined;
     private iconTimeout: NodeJS.Timeout | undefined;
     private activityThrottle = throttle(
@@ -29,46 +44,85 @@ export class RPCController {
         true
     );
 
-    constructor(clientId: string, debug = false) {
+    constructor(ctx: ExtensionContext, debug = false) {
         const config = getConfig();
-        this.client = new Client({ clientId });
         this.debug = debug;
         this.manualIdleMode = config.get(CONFIG_KEYS.Status.Idle.Check) === false;
 
+        this.oauth = new DiscordOAuth({
+            secrets: ctx.secrets,
+            redirectPort: getRedirectPort(config),
+            openUrl: (url) => env.openExternal(Uri.parse(url)),
+            askClientSecret: () =>
+                window.showInputBox({
+                    title: "Discord client secret",
+                    prompt: 'Discord rejected the login without a client secret. Either enable "Public Client" for your application or paste its client secret here (stored in the VS Code secret storage).',
+                    password: true,
+                    ignoreFocusOut: true
+                })
+        });
+
+        this.client = new HeadlessPresence(getApplicationId(config).clientId, {
+            oauth: this.oauth,
+            sessionFile: join(ctx.globalStorageUri.fsPath, "session.json"),
+            activityName: () => getActivityName(getConfig()),
+            log: (...message) => {
+                if (this.debug) logInfo("[003] Debug:", ...message);
+                else logError(...message);
+            },
+            onAuthorizationLost: (error) => this.onConnectFailed(error)
+        });
+
         editor.setStatusBarItem(StatusBarMode.Pending);
 
-        this.client.login().catch(async (error: Error) => {
-            const config = getConfig();
-
-            logError("Encountered following error while trying to login:", error);
-            editor.setStatusBarItem(StatusBarMode.Disconnected);
-            editor.errorMessageFailedToConnect(config, error);
-            await this.client?.destroy();
-            logInfo("[002] Destroyed Discord RPC client");
-        });
-
-        this.client.on("debug", (...data) => {
-            if (!this.debug) return;
-            logInfo("[003] Debug:", ...data);
-        });
-
-        this.client.on("ready", this.onReady.bind(this));
-        this.client.on("disconnected", this.onDisconnected.bind(this));
+        this.client
+            .connect(false)
+            .then(() => this.onReady())
+            .catch((error: Error) => this.onConnectFailed(error));
     }
 
     private onReady() {
-        logInfo("Successfully connected to Discord");
+        logInfo(`Successfully connected to Discord${this.client.user ? ` as ${this.client.user.username}` : ""}`);
         this.cleanUp();
 
-        if (this.enabled) void this.enable();
+        if (this.enabled) void this.enable(false);
         editor.setStatusBarItem(StatusBarMode.Succeeded);
     }
 
-    private onDisconnected() {
+    private onConnectFailed(error: Error) {
+        logError("Encountered following error while trying to connect:", error);
         this.cleanUp();
         editor.setStatusBarItem(StatusBarMode.Disconnected);
-    }
 
+        const config = getConfig();
+        if (!config.get(CONFIG_KEYS.Enable) || config.get(CONFIG_KEYS.Behaviour.SuppressNotifications)) return;
+
+        if (!this.client.clientId) {
+            void window
+                .showWarningMessage(
+                    'Better VSCord: set "vscord.app.id" to the application id of your own Discord application.',
+                    "Open Settings"
+                )
+                .then((selection) => {
+                    if (selection) void commands.executeCommand("workbench.action.openSettings", "vscord.app");
+                });
+            return;
+        }
+
+        const notAuthorized = error instanceof NotAuthorizedError;
+        void window
+            .showWarningMessage(
+                notAuthorized
+                    ? "Better VSCord is not authorized with Discord yet."
+                    : `Better VSCord could not connect to Discord: ${error.message}`,
+                notAuthorized ? "Authorize" : "Retry",
+                "Show output"
+            )
+            .then((selection) => {
+                if (selection === "Show output") outputChannel.show(true);
+                else if (selection) void commands.executeCommand("vscord.reconnect");
+            });
+    }
     private listen() {
         const config = getConfig();
 
@@ -113,16 +167,21 @@ export class RPCController {
         if (config.get(CONFIG_KEYS.Status.Problems.Enabled)) this.listeners.push(diagnosticsChange);
         if (config.get(CONFIG_KEYS.Status.Idle.Check)) this.listeners.push(changeWindowState);
 
-        this.listeners.push(fileSwitch, fileEdit, fileSelectionChanged, debugStart, debugEnd);
+        const windowFocus = window.onDidChangeWindowState((e: WindowState) => {
+            if (e.focused) void this.activityThrottle.callable();
+        });
+
+        this.listeners.push(fileSwitch, fileEdit, fileSelectionChanged, debugStart, debugEnd, windowFocus);
     }
 
     private checkCanSend(isIdling: boolean): boolean {
         const config = getConfig();
-        let userId = this.client.user?.id;
-        if (!userId) return false;
+        if (!this.client.isConnected) return (this.canSendActivity = false);
         if (isIdling && config.get(CONFIG_KEYS.Status.Idle.DisconnectOnIdle)) return (this.canSendActivity = false);
         let whitelistEnabled = config.get(CONFIG_KEYS.App.WhitelistEnabled);
         if (whitelistEnabled) {
+            let userId = this.client.user?.id;
+            if (!userId) return (this.canSendActivity = false);
             let whitelist = config.get(CONFIG_KEYS.App.Whitelist);
             if (config.get(CONFIG_KEYS.App.whitelistIsBlacklist))
                 if (whitelist!.includes(userId)) return (this.canSendActivity = false);
@@ -163,28 +222,43 @@ export class RPCController {
         }
     }
 
-    async login() {
-        const { clientId } = getApplicationId(getConfig());
-        logInfo("[004] Debug:", `Logging in with client ID "${clientId}"`);
-        logInfo("[004] Debug:", "Login - isConnected", this.client.isConnected, "isReady", this.client.clientId);
-        logInfo("[004] Debug:", `Login - ${this.client}`);
+    async login(interactive = true) {
+        const config = getConfig();
+        const { clientId } = getApplicationId(config);
+        this.oauth.redirectPort = getRedirectPort(config);
+        if (this.debug) logInfo("[004] Debug:", `Logging in with client ID "${clientId}"`);
 
-        if (this.client.isConnected && this.client.clientId === clientId) return;
+        if (this.client.clientId !== clientId) await this.client.setClientId(clientId);
+        if (this.client.isConnected) return;
 
         editor.setStatusBarItem(StatusBarMode.Pending);
-
-        if (this.client.clientId !== clientId) await this.updateClientId(clientId);
-        else if (!this.client.isConnected) await this.client.login();
+        await this.client.connect(interactive);
+        logInfo(`Successfully connected to Discord${this.client.user ? ` as ${this.client.user.username}` : ""}`);
     }
 
-    async sendActivity(isViewing = false, isIdling = false): Promise<SetActivityResponse | undefined> {
-        if (!this.enabled) return;
+    async authorize() {
+        const config = getConfig();
+        this.oauth.redirectPort = getRedirectPort(config);
+        await this.client.setClientId(getApplicationId(config).clientId);
+        editor.setStatusBarItem(StatusBarMode.Pending);
+        await this.client.reauthorize();
+    }
+
+    async logout() {
+        this.enabled = false;
+        this.cleanUp();
+        await this.client.logout();
+        await this.oauth.forgetClientSecret();
+    }
+
+    async sendActivity(isViewing = false, isIdling = false): Promise<void> {
+        if (!this.enabled || !this.client.isConnected) return;
         if (this.manualIdleMode) isIdling = this.manualIdling;
         this.checkCanSend(isIdling);
         this.state = await activity(this.state, isViewing, isIdling);
         this.state.instance = true;
         if (!this.state || Object.keys(this.state).length === 0 || !this.canSendActivity)
-            return void this.client.user?.clearActivity(process.pid);
+            return this.client.clearActivity();
         const filteredButton: GatewayActivityButton[] = [];
         this.state.buttons = (this.state.buttons ?? []).filter((button) => {
             const isValid = validURL(button.url);
@@ -199,44 +273,36 @@ export class RPCController {
                 filteredButton.map((button) => JSON.stringify(button, null, 2)).join("\n")
             );
 
-        return this.client.user?.setActivity(this.state, process.pid);
+        return this.client.setActivity(this.state);
     }
 
-    async disable() {
+    async disable(clearSharedSession = true) {
         this.enabled = false;
 
         this.cleanUp();
         if (this.idleTimeout) clearTimeout(this.idleTimeout);
         if (this.iconTimeout) clearTimeout(this.iconTimeout);
 
-        await this.client.user?.clearActivity(process.pid);
+        await this.client.clearActivity(clearSharedSession);
     }
 
-    async enable() {
-        logInfo("[004] Debug:", "Enabling Discord Rich Presence");
-
+    async enable(interactive = true) {
         this.enabled = true;
 
-        await this.login();
-        logInfo("[004] Debug:", "Client Should be logged in");
-        logInfo("[004] Debug:", `Enable - ${this.client}`);
+        try {
+            await this.login(interactive);
+        } catch (error) {
+            this.onConnectFailed(error as Error);
+            return;
+        }
 
         editor.setStatusBarItem(StatusBarMode.Succeeded);
 
-        logInfo("[004] Debug:", "Enabled - isConnected", this.client.isConnected, "isReady", this.client.clientId);
         await this.activityThrottle.callable();
         this.cleanUp();
         this.listen();
 
         if (this.iconTimeout) clearTimeout(this.iconTimeout);
-    }
-
-    async updateClientId(clientId: string) {
-        if (this.client.clientId === clientId) return;
-        await this.client.destroy();
-        this.client.clientId = clientId;
-        await this.client.login();
-        if (this.enabled) await this.sendActivity();
     }
 
     cleanUp() {
@@ -246,6 +312,10 @@ export class RPCController {
 
     async destroy() {
         await this.disable();
-        await this.client.destroy();
+        await this.client.disconnect();
+    }
+
+    async shutdown() {
+        await this.disable(false);
     }
 }
